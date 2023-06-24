@@ -1,0 +1,497 @@
+---
+title: "**Turkey Earthquakes (1915-2023)**"
+author: "**Merve Zirekğlu**"
+date: "2023-06-19"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 6
+    number_sections: true
+    smooth_scroll: false
+  rmdformats::material:
+    highlight: tango
+  warning: false
+---
+
+
+```{css, echo=FALSE}
+.columns {display: flex; warning = FALSE}
+h1{color: #8B0000 ; warning = FALSE}
+h2{color: #CD0000; warning = FALSE}
+h3{color: #EE0000; warning = FALSE}
+```
+
+
+
+# **Önsöz**
+
+Bu çalışma, kaggle’dan alınan Turkey Earthquakes (1915-2023)(*) adlı, 1915-2023 arası Türkiye depremlerini ve özelliklerini içeren veri seti ile hazırlanmıştır. 
+
+(*)  **<https://www.kaggle.com/datasets/atasaygin/turkey-earthquakes-1915-2023>**
+
+
+
+
+![](C:/Users/zrkgl/Desktop/turkey_earthquakes/fay_hatlari.jpg)
+
+
+Veri seti Türkiye'de ve yakın kapsama alanında meydana gelen depremleri içermektedir. Bu veriler 1915'ten Ocak 2023'e kadar olan aralıkta ve 3.5 büyüklüğünden fazla olan depremleri içermektedir.
+
+Analiz kapsamında Yıllara Göre Haritalama, Kabarcık Çizimi Grafiği, Korelasyon Haritası, Zaman Serisi Grafiği ve Derinlik Haritası incelenecektir.
+
+Veriyi import edelim;
+
+
+```{r}
+tr_earthquakes <- read.csv("turkey_earthquakes_1915_2023.csv")
+head(tr_earthquakes)
+```
+
+
+```{r}
+ncol(tr_earthquakes)
+nrow(tr_earthquakes)
+```
+
+Veri seti 15 değişken ve 19908 gözlemden oluşmaktadır. Yani belirtilen yıllar arasında Türkiye'de 3.5 büyüklüğünün üstünde 19908 deprem kaydedilmiştir. 
+
+
+
+Değişkenleri inceleyelim;
+
+```{r}
+colnames(tr_earthquakes)
+```
+
+**No** : İndex
+
+**Deprem.Kodu** : Deprem kodu
+
+**Olus.tarihi** : Gerçekleştiği tarih
+
+**Olus.zamani** : Gerçekleştiği saat:dakika:saniye:salise
+
+**Enlem** : Gerçekleştiği enlem
+
+**Boylam** : Gerçekleştiği boylam
+
+**Derinlik** : Derinliği
+
+**xM** : Verilen büyüklük değerleri (MD, ML, Mw, Ms, Mb) arasındaki en büyük değer
+
+**MD** : Süreye bağlı büyüklük
+
+**ML** : Yerel (Lokal) büyüklük
+
+**Mw** : Moment büyüklüğü
+
+**Ms** : Yüzey dalgası büyüklüğü
+
+**Mb** : Cisim dalgası büyüklüğü
+
+**Tip** : Deprem tipi
+
+**Yer** : Gerçekleştiği yer
+
+
+
+**"No"** değişkeni indexleri belirtiyor. Analiz kapsamında kullanılmayacağı için silebiliriz.
+
+```{r}
+tr_earthquakes$No <- NULL
+```
+
+
+
+# **Eksik Değerler** 
+
+Öncelikle eksik değer kontrolü yapalım;
+
+```{r}
+colSums(is.na(tr_earthquakes))
+```
+
+
+Yalnızca Mw değişkeninde eksik değer olduğunu görmekteyiz. Toplam gözlem sayımız 19908 idi. Bu durumda 12981 değer eksikliği oldukça fazladır. Ancak yine de regresyon yöntemi ile eksik değerleri doldurarak devam edelim.
+
+## **Eksik Gözlem Doldurma**
+
+xM değişkenini unutmamalıyız. xM değişkeni; MD, ML, Mw, Ms, Mb arasındaki en büyük değer olarak veri setinde yer alıyordu. O halde Mw değişkeni xM değişkenine eşit veya ondan küçük olmalı.
+
+*12981 tane eksik değer doldurulacak. İterasyonların görünmemesi için results = "hide" kullanıldı.*
+
+
+```{r results = "hide"}
+library(Hmisc)
+impute_arg <- aregImpute(Mw ~ Deprem.Kodu + Enlem + Boylam + Derinlik + xM + MD + ML + Ms + Mb , data = tr_earthquakes, n.impute = 1)
+
+# Doldurulan Mw değerleri;
+impute_arg$imputed$Mw 
+
+new <- which(is.na(tr_earthquakes$Mw))
+
+# Atama işlemi;
+tr_earthquakes[new,]$Mw <- impute_arg$imputed$Mw  
+```
+
+
+
+
+Mw değişkeni xM değişkenine eşit veya ondan küçük olmalıydı. 
+Bu sebeple, eğer xM'den büyük Mw varsa, xM'leri değiştirelim.
+
+
+```{r}
+for (i in 1:nrow(tr_earthquakes)) {
+  if (tr_earthquakes$Mw[i] > tr_earthquakes$xM[i]) {
+    tr_earthquakes$xM[i] <- tr_earthquakes$Mw[i]
+  } else {
+    next
+  }
+}
+```
+
+
+Kontrol edelim;
+
+Eğer Mw'de xM'den büyük deeğr varsa "Hata", yoksa "Sorunsuz" yazdıralım.
+
+```{r}
+if (any(tr_earthquakes$Mw > tr_earthquakes$xM)) {
+  print("Hata")
+} else {
+  print("Sorunsuz")
+}
+```
+
+Koşul sağlandığına göre analizlere başlayabiliriz.
+
+
+
+# **Harita İncelemesi**
+
+Veri setimiz Tükiye'deki depremler ile ilgili. Bu anlamda öncelikle harita ile inceleme yapalım.
+
+Öncelikle Olus.tarihi değişkeninin formatını düzeltelim. DD/MM/YYYY şeklinde olsun.
+
+
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+tr_earthquakes <- tr_earthquakes %>%
+  mutate(Olus.tarihi = as.Date(Olus.tarihi, format = "%Y.%m.%d")) %>%
+  mutate(Olus.tarihi = format(Olus.tarihi, "%d/%m/%Y"))
+```
+
+
+
+
+```{r}
+head(tr_earthquakes)
+```
+
+Format istediğimiz gibi oldu.
+
+
+Veri setimiz oldukça fazla depremi içeriyor. Haritalamayı daha basic yapmak için veri setini yıllara göre gruplayalım. Her 20 yıl için bir grup oluşturalım. 
+
+
+```{r}
+group1 <- tr_earthquakes %>%
+  filter(as.Date(Olus.tarihi, format = "%d/%m/%Y") <= as.Date("31/12/1934", format = "%d/%m/%Y"))
+
+group2 <- tr_earthquakes %>%
+  filter(as.Date(Olus.tarihi, format = "%d/%m/%Y") > as.Date("31/12/1934", format = "%d/%m/%Y") &
+           as.Date(Olus.tarihi, format = "%d/%m/%Y") <= as.Date("31/12/1954", format = "%d/%m/%Y"))
+
+group3 <- tr_earthquakes %>%
+  filter(as.Date(Olus.tarihi, format = "%d/%m/%Y") > as.Date("31/12/1954", format = "%d/%m/%Y") &
+           as.Date(Olus.tarihi, format = "%d/%m/%Y") <= as.Date("31/12/1974", format = "%d/%m/%Y"))
+
+group4 <- tr_earthquakes %>%
+  filter(as.Date(Olus.tarihi, format = "%d/%m/%Y") > as.Date("31/12/1974", format = "%d/%m/%Y") &
+           as.Date(Olus.tarihi, format = "%d/%m/%Y") <= as.Date("31/12/1994", format = "%d/%m/%Y"))
+
+group5 <- tr_earthquakes %>%
+  filter(as.Date(Olus.tarihi, format = "%d/%m/%Y") > as.Date("31/12/1994", format = "%d/%m/%Y") &
+           as.Date(Olus.tarihi, format = "%d/%m/%Y") <= as.Date("31/12/2014", format = "%d/%m/%Y"))
+
+group6 <- tr_earthquakes %>%
+  filter(as.Date(Olus.tarihi, format = "%d/%m/%Y") > as.Date("31/12/2014", format = "%d/%m/%Y"))
+```
+
+
+Artık haritalamaya geçebiliriz. Haritalarda konum belirten işaretin rengi default olarak mavi gelmektedir. Ancak depremleri inceleyeceğimiz bu analiz için konum işaretlerinin rengini kırmızı yapalım. Böylelikle dikkat çekmek istediğimiz yerlere daha rahat odaklanabiliriz.
+
+
+**"Kırmızı alanlara tıklayarak bölgelerin isimlerine erişebilirsiniz."**
+
+
+## **1915-1934 Depremleri**
+
+```{r}
+library(leaflet)
+
+m1 <- leaflet() %>% 
+  addTiles() %>% 
+  addProviderTiles("Esri.WorldImagery") %>% 
+  addCircleMarkers(data = group1, lng = ~Boylam, lat = ~Enlem, popup = ~Yer, radius = 3, color = "red")
+
+m1
+```
+
+
+Grafik 1915-1934 yıllarını kapsamaktadır. Gelecek yıllara baktığımızda, bu yıllar için deprem sayılarının nispeten az olduğunu söyleyebiliriz. Ancak belirtilen yıllar, günümüzün ortalama 100 yıl gerisinde. Bu sebeple depremlerin az gözlemlenmesi, depremlerin az olmasından kaynaklı olabileceği gibi o zamanın teknolojisinden de kaynaklı olabilir. 
+
+
+
+## **1934-1954 Depremleri**
+
+```{r}
+m2 <- leaflet() %>% 
+  addTiles() %>% 
+  addProviderTiles("Esri.WorldImagery") %>% 
+  addCircleMarkers(data = group2, lng = ~Boylam, lat = ~Enlem, popup = ~Yer, radius = 3, color = "red")
+
+m2
+```
+
+
+1934-1954 grafiğini, kabaca bir önceki grafiğin daha yoğun hali olarak yorumlayabiliriz. Deprem sayılarının arttığını görmekteyiz. İl olarak Kastamonu tarafında, bölge olarak ise Batı Akdeniz ve Ege taraflarında depremler artmıştır.
+
+
+
+## **1954-1974 Depremleri**
+
+```{r}
+m3 <- leaflet() %>% 
+  addTiles() %>% 
+  addProviderTiles("Esri.WorldImagery") %>% 
+  addCircleMarkers(data = group3, lng = ~Boylam, lat = ~Enlem, popup = ~Yer, radius = 3, color = "red")
+
+m3
+```
+
+
+1954-1974 grafiğinde Ege, Akdeniz ve Marmara bölgelerinde depremler oldukça artmıştır.
+
+
+
+## **1974-1994 Depremleri**
+
+```{r}
+m4 <- leaflet() %>% 
+  addTiles() %>% 
+  addProviderTiles("Esri.WorldImagery") %>% 
+  addCircleMarkers(data = group4, lng = ~Boylam, lat = ~Enlem, popup = ~Yer, radius = 3, color = "red")
+
+m4
+```
+
+
+1974-1994 grafiğinde önceki grafiklere göre artış olmuştur. Ancak bu grafiğe kadar (bu grafik de dahil olmak üzere) Kuzey Anadolu Fay Hattı kısmında çok yoğunluk gözlemlenmemiştir. 
+
+
+
+## **1994-2014 Depremleri**
+
+```{r}
+m5 <- leaflet() %>% 
+  addTiles() %>% 
+  addProviderTiles("Esri.WorldImagery") %>% 
+  addCircleMarkers(data = group5, lng = ~Boylam, lat = ~Enlem, popup = ~Yer, radius = 3, color = "red")
+
+m5
+```
+
+
+1994-2014 arasında haritanın nasıl kırmızıya döndüğünü ve deprem sayılarını arttığını görmekteyiz. Çoğu ilde hatta nispeten deprem bölgesi sayılmayan İç Anadolu Bölgesi'nde bile depreme oldukça sık raslanmıştır.
+
+
+
+## **2014-2023  Depremleri**
+
+```{r}
+m6 <- leaflet() %>% 
+  addTiles() %>% 
+  addProviderTiles("Esri.WorldImagery") %>% 
+  addCircleMarkers(data = group6, lng = ~Boylam, lat = ~Enlem, popup = ~Yer, radius = 3, color = "red")
+
+m6
+```
+
+
+En dar alanı kapsayan grafik bu grafiktir. Çünkü yalnızca 2014-2023 yılları arasını yani 8 yılı kapsar. *2014 bir önceki grafiğe dahildi.*
+
+Bu kadar az yıla rağmen oldukça fazla deprem ile karşılaştığımızı haritadan görebiliriz. Özellikle Şubat 2023'te Türkiye'yi vuran depremi de haritadan gözlemleyebiliriz. 
+
+
+# **Kabarcık Çizimi**
+
+Enlem ve Boylamlar için Kabarcık çizimi yapalım. Böylelikle aynı koordinatlarda karşılaşılan depremlerin frekanslarını görsel olarak yorumlayabiliriz.
+
+Bu inceleme için grDevices şemasından heat.colors skalası kullanılmış olup rev() fonksiyonu ile skala tam tersine çevrilmiştir. Çünkü bu şekilde en çok deprem olan yerler kırmızı, en az olanlar ise gittikçe açılan renkler ile temsil edilmektedir.
+
+
+Vurgulanacak yerlerin kırmızı seçilmesinin nedeni, bu rengi "tehlike" anlamı da taşımasından ötürüdür. Verinin önem ve etkisini vurgulamaya yardımcı olarak daha çarpıcı görünmesini sağlar.
+
+
+```{r}
+library(hexbin)
+library(ggplot2)
+library(grDevices)
+
+# Renk şemasını kullanalım;
+color_palette <- rev(grDevices::heat.colors(20))
+
+ggplot(tr_earthquakes, aes(x = Enlem, y = Boylam)) +
+  geom_hex(bins = 20, color = "white") +
+  scale_fill_gradientn(colors = color_palette)
+```
+
+
+
+
+Grafiği incelediğimizde sağdaki skaladan faydalanarak hangi koordinatlarda daha sık seprem olduğunu görebiliriz. Örneğin grafiğin alt ve orta kısımlarında yer alan koordinatlarda oldukça fazla depreme raslanmıştır. Tam kırmızı olan yerlerde deprem sayısı 400'e ulaşmaktadır.
+
+Özellikle boylamı 25-30 arası ve enlemi 40'a kadar olan yerlerde depreme oldukça fazla raslanmıştır.
+
+
+
+
+# **Korelasyon Haritası**
+
+Derinlik değişkenini, bağımlı değişken gibi düşünelim. Diğer değişkenler ile Derinlik'in ilişkili olup olmadığına bakalım.
+
+Öncelikle Deprem Kodu, Enlem, Boylam bilgileri ile karşılaştırma yapalım.
+
+Bu grafik için RColorBrewer paketinden PuBu skalası kullanılmıştır. Mavi tonlarının seçilmesinin nedeni bu rengin güven ve umut vermesidir. Ne kadar koyu mavi görürsek güvenimiz de bir o kadar artacaktır.
+
+```{r}
+library(corrplot)
+library(RColorBrewer)
+
+corrplot(cor(tr_earthquakes[,c(1,4,5,6)]), method = "ellipse", col = brewer.pal(n = 9, name = "PuBu"))
+```
+
+Derinlik ile Deprem koduna baktığımızda elips şeklinin belirgin olduğunu görürüz. İstediğimiz koyulukta bir mavi ya da elipse sahip olamadık ancak sonuç hiç de fena değil. Enleme baktığımızda deprem kodu değişkeninden çok az daha kötü bir elips var. Boylamdaki şekil ise elipse pek benzemiyor. Bu yüzden Derinlij ile boylamın ilişkisi en zayıf bulunmuşken Deprem kodu ile maksimum ilişkiyi yakaladığımızı söyleyebiliriz.
+
+MD, ML, Mw, Ms, Mb değişkenleri ile ilişkilerini de inceleyelim.
+
+```{r}
+
+corrplot(cor(tr_earthquakes[,c(8,9,10,11,12,6)]), method = "ellipse", col = brewer.pal(n = 9, name = "PuBu"))
+```
+
+
+MD değişkeni süreye bağlı büyüklüğü, ML değişkeni yerel (lokal) büyüklüğü, Mw değişkeni moment büyüklüğünü, Ms değişkeni yüzey dalgası büyüklüğünü, Mb değişkeni cisim dalgası büyüklüğünü ifade etmekteydi. 
+
+Derinlik ile korelasyon haritalarını incelediğimizde en koyu mavinin ve en belirgin elipsin Mb değişkeninde olduğunu görmekteyiz. Yani, depremin derinliği ile cisim dalgası büyüklüğünün ilişkisi oldukça yüksek görünmektedir.
+
+Ms değişkeni (yüzey dalgası büyüklüğü) de ilişki olarak kötü görünmemektedir. Ancak MD, ML VE Mw değişkenleri elipsten ziyade daireye benzemektedir. Renkleri de Ms ve Mb değişkenlerine göre nispeten daha açık durmaktadır. Bu sebeple bu değişkenler Derinlik ile daha az ilişkilidir diyebiliriz.
+
+
+
+# **Zaman Serisi Grafiği**
+
+Depremleri belli yıllara göre gruplayarak harita ile incelemiştik. Şimdi ise tüm yılları bir arada inceleyerek yıllara göre depremlerin derinliklerinde gözlemlenen artış ve azalışlara bakalım.
+
+Bu grafik için RColorBrewer paketinden OrRd skalası kullanılmıştır. Derinliğin artış ve azalışlarına göre renkler değişecektir. Depremlerin yıllara göre derinliklerinin artması tehlikesine dikkat çekmek adına bu palet ile kırmızı tonları tecih edilmiştir.
+
+Öncelikle yılları çekip yeni bir değişken oluşturalım.
+
+```{r}
+library(lubridate)
+
+tr_earthquakes$Olus.tarihi <- dmy(tr_earthquakes$Olus.tarihi)
+tr_earthquakes$Year <- year(tr_earthquakes$Olus.tarihi)
+```
+
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+color_palette <- brewer.pal(9, "OrRd")
+
+yearof <- tr_earthquakes %>% 
+  group_by(Year) %>%
+  summarise(toplamDerinlik = sum(Derinlik))
+
+ggplot(yearof, aes(x = Year, y = toplamDerinlik, group = 1, color = toplamDerinlik)) +
+  geom_line(size = 1) +
+  scale_color_gradient(low = color_palette[3.5], high = color_palette[9]) +
+  labs(title = "Yıllara Göre Depremlerin Derinliği", x = "Yıllar", y = "Derinlik") +
+  theme(plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+        axis.title.x = element_text(size = 14, face = "bold"),
+        axis.title.y = element_text(size = 14, face = "bold"),
+        axis.text.x = element_text(angle = 0, size = 10, face = "bold"),
+        axis.text.y = element_text(angle = 0, size = 10, face = "bold"),
+        panel.background = element_rect(fill = "white"))
+```
+
+
+
+Grafiği incelediğimizde özellikle 1960'a kadar olan kısımda derinliğin nispeten az olduğunu görmekteyiz. Ancak hemen hemen 1960'dan sonra depremlerde kaydedilen derinlik de artmıştır. Özellikle grafiğin son kısmındaki pik noktasının 2023 yılında gerçekleşen depremden kaynaklı olduğunu görmekteyiz. 
+
+
+
+
+# **Derinlik Haritası**
+
+Araştırmacılar, depremin esas şiddetini belirleyenin büyüklüğü değil, derinliği olduğunu söylemektedir.
+
+```{r}
+range(tr_earthquakes$Derinlik)
+```
+
+
+
+Türkiyede kaydedilen depremlerin derinlikleri 0-199 km arasındadır. O halde 150km ve üzeri derinliğe sahip olan depremlerin haritasını inceleyelim.
+
+
+```{r}
+tr_earthquakes_derinlik <- tr_earthquakes[tr_earthquakes$Derinlik > 150, ]
+
+head(tr_earthquakes_derinlik)
+```
+
+```{r}
+m7 <- leaflet() %>% 
+  addTiles() %>% 
+  addProviderTiles("Esri.WorldImagery") %>% 
+  addCircleMarkers(data = tr_earthquakes_derinlik, lng = ~Boylam, lat = ~Enlem, popup = ~Yer, radius = 3, color = "red")
+
+m7
+```
+
+
+Harita incelendiğinde, kaydedilen en derin depremlerin özellikle Akdeniz açıklarında gerçekleştiği görülmektedir. Ayrıca Şanlıurfa, Diyarbakır ve Bingöl illeri de bu listeye dahil olmaktadır.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# **Kaynak**
+
+<http://www.koeri.boun.edu.tr/bilgi/buyukluk.htm>
+
+
+
+
+
+
